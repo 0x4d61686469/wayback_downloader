@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-
 import re, datetime, argparse, time, requests, os, json
 
 class colors:
