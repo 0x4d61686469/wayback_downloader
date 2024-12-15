@@ -1,4 +1,3 @@
-#!/usr/bin/python3
 import re, datetime, argparse, time, requests, os, json
 
 class colors:
@@ -12,9 +11,10 @@ def logger(debug, message):
         print(f"{colors.CYAN}[{colors.WARNING}debug{colors.CYAN}][{current_time}] {colors.ENDC}{message}")
 
 def setup_argparse():
-    parser = argparse.ArgumentParser(description="Wayback Downloader")
+    parser = argparse.ArgumentParser(description="Robo Finder")
     parser.add_argument("--debug", action="store_true", default=False, help="Enable debugging mode.")
-    parser.add_argument("--url", "-u", required=True, type=str, help="Base URL for archive search.")
+    parser.add_argument("--url", "-u", type=str, help="Base URL for archive search.")
+    parser.add_argument("--retry", "-r", type=str, help="Path to status file for retrying failed downloads.")
     return parser.parse_args()
 
 def construct_file_name(url):
@@ -76,11 +76,7 @@ def get_all_links(url, debug):
         logger(debug, f"Failed to fetch archive data: {e}")
         exit(1)
 
-    # Remove the header row ['timestamp', 'original'] if present
-    if obj and obj[0] == ["timestamp", "original"]:
-        obj.pop(0)
-
-    url_list = [f"https://web.archive.org/web/{i[0]}if_/{i[1]}" for i in obj if len(i) > 1]
+    url_list = [f"https://web.archive.org/web/{i[0]}if_/{i[1]}" for i in obj if len(i) > 1 and i != ["timestamp", "original"]]
 
     logger(debug, f"Found {len(url_list)} archive links.")
     if not url_list:
@@ -89,12 +85,69 @@ def get_all_links(url, debug):
 
     return url_list
 
+def retry_failed_downloads(status_file, debug):
+    if not os.path.exists(status_file):
+        logger(debug, f"Status file not found: {status_file}")
+        exit(1)
+
+    try:
+        with open(status_file, 'r') as file:
+            status_data = json.load(file)
+    except json.JSONDecodeError as e:
+        logger(debug, f"Failed to parse status file: {e}")
+        exit(1)
+
+    failed_urls = [item["url"] for item in status_data.get("errors", [])]
+
+    if not failed_urls:
+        logger(debug, "No failed downloads found in the status file.")
+        return
+
+    logger(debug, f"Retrying {len(failed_urls)} failed downloads.")
+    
+    for url in failed_urls:
+        file_name = construct_file_name(url)
+        if file_name:
+            file_path = os.path.join(os.getcwd(), file_name)
+            if os.path.exists(file_path):
+                logger(debug, f"File already exists, skipping retry: {file_name}")
+                continue
+            try:
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                with open(file_path, 'wb') as file:
+                    file.write(response.content)
+                logger(debug, f"Downloaded and saved: {file_name}")
+                status_data["downloaded"].append(file_name)
+                # Remove retried URL from errors
+                status_data["errors"] = [e for e in status_data["errors"] if e["url"] != url]
+            except requests.exceptions.RequestException as e:
+                logger(debug, f"Failed again to download {url}: {e}")
+                # Update the error message in the status file
+                for error_entry in status_data["errors"]:
+                    if error_entry["url"] == url:
+                        error_entry["error"] = str(e)
+
+    # Save updated status file
+    with open(status_file, 'w') as file:
+        json.dump(status_data, file, indent=4)
+
+    logger(debug, f"Updated status file: {status_file}")
+
+
 def main():
     args = setup_argparse()
     start_time = time.time()
     logger(args.debug, "Program started.")
-    url_list = get_all_links(args.url, args.debug)
-    downloader(url_list, args.debug, args.url)
+
+    if args.retry:
+        retry_failed_downloads(args.retry, args.debug)
+    elif args.url:
+        url_list = get_all_links(args.url, args.debug)
+        downloader(url_list, args.debug, args.url)
+    else:
+        logger(args.debug, "No valid input provided. Use --url or --retry.")
+
     logger(args.debug, f"Program completed in {time.time() - start_time:.2f} seconds.")
 
 if __name__ == "__main__":
