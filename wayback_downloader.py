@@ -13,7 +13,7 @@ def logger(debug, message):
         print(f"{colors.CYAN}[{colors.WARNING}debug{colors.CYAN}][{current_time}] {colors.ENDC}{message}")
 
 def setup_argparse():
-    parser = argparse.ArgumentParser(description="Robo Finder")
+    parser = argparse.ArgumentParser(description="Wayback Downloader")
     parser.add_argument("--debug", action="store_true", default=False, help="Enable debugging mode.")
     parser.add_argument("--url", "-u", required=True, type=str, help="Base URL for archive search.")
     return parser.parse_args()
